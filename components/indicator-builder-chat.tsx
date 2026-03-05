@@ -407,8 +407,8 @@ export default function IndicatorBuilderChat({
         if (ema1Values[i] === null || ema2Values[i] === null) continue;
         if (ema1Values[i - 1] === null || ema2Values[i - 1] === null) continue;
 
-        const prevCross = ema1Values[i - 1] - ema2Values[i - 1];
-        const currCross = ema1Values[i] - ema2Values[i];
+        const prevCross = ema1Values[i - 1]! - ema2Values[i - 1]!;
+        const currCross = ema1Values[i]! - ema2Values[i]!;
 
         // EMA curta cruza acima da longa (compra)
         if (prevCross <= 0 && currCross > 0) {
@@ -596,8 +596,8 @@ export default function IndicatorBuilderChat({
         if (ema1Values[i] === null || ema2Values[i] === null) continue;
         if (ema1Values[i - 1] === null || ema2Values[i - 1] === null) continue;
 
-        const prevCross = ema1Values[i - 1] - ema2Values[i - 1];
-        const currCross = ema1Values[i] - ema2Values[i];
+        const prevCross = ema1Values[i - 1]! - ema2Values[i - 1]!;
+        const currCross = ema1Values[i]! - ema2Values[i]!;
 
         if (prevCross <= 0 && currCross > 0) {
           updatedBuySignals.push(i);

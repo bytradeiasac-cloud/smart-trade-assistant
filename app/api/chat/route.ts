@@ -395,7 +395,7 @@ CRÍTICO: Você DEVE responder EXCLUSIVAMENTE em português brasileiro. TODAS as
   // Convert messages to Gemini format
   const geminiMessages = messages.map((msg) => ({
     role: msg.role === 'user' ? 'user' : 'model',
-    parts: [{ text: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content) }],
+    parts: [{ text: typeof (msg as any).content === 'string' ? (msg as any).content : JSON.stringify((msg as any).content) }],
   }));
 
   // Add system prompt as first user message if not empty

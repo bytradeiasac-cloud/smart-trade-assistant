@@ -45,11 +45,11 @@ interface TradingChartProps {
 export default function TradingChart({ data, symbol, indicators = [], priceLines = [], markers = [] }: TradingChartProps) {
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
-  const candlestickSeriesRef = useRef<ISeriesApi<CandlestickSeries> | null>(null);
-  const indicatorSeriesRef = useRef<Map<string, ISeriesApi<LineSeries>>>(new Map());
+  const candlestickSeriesRef = useRef<any>(null);
+  const indicatorSeriesRef = useRef<Map<string, any>>(new Map());
   const priceLinesRef = useRef<Map<string, any>>(new Map());
-  const buySignalSeriesRef = useRef<ISeriesApi<LineSeries> | null>(null);
-  const sellSignalSeriesRef = useRef<ISeriesApi<LineSeries> | null>(null);
+  const buySignalSeriesRef = useRef<any>(null);
+  const sellSignalSeriesRef = useRef<any>(null);
   const [currentPrice, setCurrentPrice] = useState<number | null>(null);
   const [priceChange, setPriceChange] = useState<number>(0);
 
@@ -120,7 +120,7 @@ export default function TradingChart({ data, symbol, indicators = [], priceLines
     // Series para sinais de compra (pontos azul ciano)
     const buySignalSeries = chart.addSeries(LineSeries, {
       color: 'transparent',
-      lineWidth: 0,
+      lineWidth: 1,
       lineVisible: false,
       pointMarkersVisible: true,
       pointMarkersRadius: 5,
@@ -135,7 +135,7 @@ export default function TradingChart({ data, symbol, indicators = [], priceLines
     // Series para sinais de venda (pontos laranja)
     const sellSignalSeries = chart.addSeries(LineSeries, {
       color: 'transparent',
-      lineWidth: 0,
+      lineWidth: 1,
       lineVisible: false,
       pointMarkersVisible: true,
       pointMarkersRadius: 5,

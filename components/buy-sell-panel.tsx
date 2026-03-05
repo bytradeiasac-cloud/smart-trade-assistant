@@ -8,8 +8,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 interface BuySellPanelProps {
   symbol: string;
   currentPrice: number | null;
-  onBuy: (quantity: number, price: number, leverage?: number) => void;
-  onSell: (quantity: number, price: number, leverage?: number) => void;
+  onBuy: (quantity: number, price: number, leverage?: number, sl?: number, tp?: number) => void;
+  onSell: (quantity: number, price: number, leverage?: number, sl?: number, tp?: number) => void;
   onCreateLimitOrder?: (quantity: number, limitPrice: number, orderType: 'BUY' | 'SELL', leverage: number) => void;
   onStopLossChange?: (price: number) => void;
   onTakeProfitChange?: (price: number) => void;
@@ -76,13 +76,13 @@ export default function BuySellPanel({
     qty > 0 &&
     (orderType === 'market'
       ? currentPrice !== null && currentPrice > 0
-      : price > 0) &&
+      : price !== null && price > 0) &&
     (orderSide === 'buy'
       ? leveragedCost <= availableBalance
       : leveragedCost <= availableBalance); // SHORT também usa saldo USDT
 
   const handleExecute = () => {
-    if (!canExecute || price === 0) return;
+    if (!canExecute || price === 0 || price === null) return;
 
     const sl = stopLoss ? parseFloat(stopLoss) : undefined;
     const tp = takeProfit ? parseFloat(takeProfit) : undefined;
@@ -334,7 +334,7 @@ export default function BuySellPanel({
                   ? 'text-green-500'
                   : 'text-muted-foreground'
               }`}>
-                {Math.abs(((parseFloat(takeProfit) - currentPrice) / currentPrice) * 100).toFixed(2)}% alvo
+                {currentPrice ? Math.abs(((parseFloat(takeProfit) - currentPrice) / currentPrice) * 100).toFixed(2) : 0}% alvo
               </span>
             )}
           </div>
@@ -342,7 +342,7 @@ export default function BuySellPanel({
       )}
 
       {/* Resumo */}
-      {qty > 0 && price > 0 && (
+      {qty > 0 && price !== null && price > 0 && (
         <div className="bg-secondary/50 rounded p-2 space-y-1 text-xs">
           <div className="flex justify-between">
             <span className="text-muted-foreground">Total:</span>
@@ -380,7 +380,7 @@ export default function BuySellPanel({
       >
         {orderType === 'market' 
           ? `${orderSide === 'buy' ? 'Comprar' : 'Vender'} Mercado`
-          : `Criar Ordem ${orderSide === 'buy' ? 'Compra' : 'Venda'} ${price > 0 ? `@ $${price.toFixed(2)}` : ''}`
+          : `Criar Ordem ${orderSide === 'buy' ? 'Compra' : 'Venda'} ${price !== null && price > 0 ? `@ $${price.toFixed(2)}` : ''}`
         }
       </Button>
 
