@@ -456,7 +456,7 @@ export default function TradingDashboard() {
             ...prev,
             usdt: prev.usdt + revenue,
             positions: newQty <= 0
-              ? { ...prev.positions, [trade.symbol]: undefined }
+              ? (() => { const { [trade.symbol]: _, ...rest } = prev.positions; return rest; })()
               : { ...prev.positions, [trade.symbol]: { ...pos, quantity: newQty } },
           };
         });

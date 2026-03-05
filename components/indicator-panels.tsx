@@ -46,8 +46,8 @@ export default function IndicatorPanels({ data = [], visible = {} }: IndicatorPa
   console.log('[v0] IndicatorPanels - visible panels:', visible);
 
   // Convert KlineData to Candle format - KlineData has 'timestamp' not 'time'
-  const candles: Candle[] = (data || []).map(d => ({
-    timestamp: d.timestamp, // KlineData uses 'timestamp' in milliseconds
+  const candles: (Candle & { timestamp: number })[] = (data || []).map((d: any) => ({
+    timestamp: d.timestamp as number,
     open: typeof d.open === 'number' ? d.open : parseFloat(d.open),
     high: typeof d.high === 'number' ? d.high : parseFloat(d.high),
     low: typeof d.low === 'number' ? d.low : parseFloat(d.low),

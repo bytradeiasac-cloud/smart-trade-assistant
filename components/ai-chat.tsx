@@ -83,7 +83,7 @@ export default function AIChat({
       priceChange24h: priceChange,
       indicators: indicators.filter(i => i.visible).map(i => ({ type: i.type, period: i.period })),
       candles: chartData.map(c => ({
-        time: c.time,
+        time: (c as any).time || (c as any).timestamp,
         open: c.open,
         high: c.high,
         low: c.low,
