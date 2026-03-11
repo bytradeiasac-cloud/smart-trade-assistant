@@ -88,10 +88,99 @@ export default function TradingDashboard() {
   }, [symbol, timeframe]);
 
   useEffect(() => {
+    if (!user) return;
     fetchChartData();
     const interval = setInterval(fetchChartData, 30000);
     return () => clearInterval(interval);
-  }, [fetchChartData]);
+  }, [fetchChartData, user]);
+
+  // Sync open trade lines on chart
+  useEffect(() => {
+    setPriceLines(prev => {
+      let filtered = prev.filter(pl => !pl.label.includes('[TRADE:'));
+      trades.forEach(trade => {
+        if (trade.status === 'OPEN') {
+          filtered.push({
+            price: trade.entryPrice,
+            label: `${trade.type} ${trade.quantity.toFixed(8)} @ $${trade.entryPrice.toFixed(2)} [TRADE:${trade.id}]`,
+            color: trade.type === 'BUY' ? '#3b82f6' : '#f59e0b',
+          });
+        }
+      });
+      return filtered;
+    });
+  }, [trades]);
+
+  // Monitor pending orders execution
+  useEffect(() => {
+    if (!currentPrice || pendingOrders.length === 0) return;
+
+    pendingOrders.forEach(order => {
+      const shouldExecute = 
+        (order.type === 'BUY' && currentPrice <= order.limitPrice) ||
+        (order.type === 'SELL' && currentPrice >= order.limitPrice);
+
+      if (shouldExecute) {
+        if (order.type === 'BUY') {
+          handleBuy(order.quantity, order.limitPrice, order.leverage);
+        } else {
+          handleSell(order.quantity, order.limitPrice, order.leverage);
+        }
+        removePendingOrder(order.id);
+        setPriceLines(prev => prev.filter(pl => !pl.label.includes(`[ID:${order.id}]`)));
+      }
+    });
+  }, [currentPrice, pendingOrders]);
+
+  // Monitor stop loss and take profit
+  useEffect(() => {
+    if (!currentPrice) return;
+
+    trades.forEach(trade => {
+      if (trade.status !== 'OPEN') return;
+
+      const shouldCloseSL = 
+        (trade.type === 'BUY' && trade.stopLoss && currentPrice <= trade.stopLoss) ||
+        (trade.type === 'SELL' && trade.stopLoss && currentPrice >= trade.stopLoss);
+
+      const shouldCloseTP = 
+        (trade.type === 'BUY' && trade.takeProfit && currentPrice >= trade.takeProfit) ||
+        (trade.type === 'SELL' && trade.takeProfit && currentPrice <= trade.takeProfit);
+
+      if (shouldCloseSL || shouldCloseTP) {
+        const closePrice = shouldCloseSL && trade.stopLoss ? trade.stopLoss : trade.takeProfit;
+        if (!closePrice) return;
+
+        const profit = (closePrice - trade.entryPrice) * trade.quantity;
+        const profitPercent = ((closePrice - trade.entryPrice) / trade.entryPrice) * 100;
+
+        updateTrade(trade.id, {
+          exitPrice: closePrice,
+          exitTime: Date.now(),
+          status: 'CLOSED',
+          profit,
+          profitPercent,
+        });
+
+        const pos = wallet.positions[trade.symbol];
+        if (pos) {
+          const revenue = trade.quantity * closePrice;
+          const newQty = pos.quantity - trade.quantity;
+          saveWallet({
+            ...wallet,
+            usdt: wallet.usdt + revenue,
+            positions: newQty <= 0
+              ? (() => { const { [trade.symbol]: _, ...rest } = wallet.positions; return rest; })()
+              : { ...wallet.positions, [trade.symbol]: { ...pos, quantity: newQty } },
+          });
+        }
+
+        setPriceLines(prev => 
+          prev.filter(pl => pl.price !== trade.stopLoss && pl.price !== trade.takeProfit)
+        );
+      }
+    });
+  }, [currentPrice, trades]);
 
   // Show loading while auth initializes
   if (!isReady) {
