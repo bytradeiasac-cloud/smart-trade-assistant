@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import dynamic from 'next/dynamic';
-import { KlineData, TimeFrame } from '@/lib/bybit';
+import { KlineData, TimeFrame, getKlineData, getTickers } from '@/lib/bybit';
 import { Indicator, PriceLine } from '@/components/trading-chart';
 import TradingControls, { AVAILABLE_INDICATORS, PANEL_INDICATORS } from '@/components/trading-controls';
 import CustomIndicators from '@/components/custom-indicators';

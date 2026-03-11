@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { TickerData } from '@/lib/bybit';
+import { TickerData, getTickers } from '@/lib/bybit';
 
 interface PriceTickerProps {
   onSelectSymbol: (symbol: string) => void;
