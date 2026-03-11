@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { TickerData } from '@/lib/bybit';
+import { TickerData, getTickers } from '@/lib/bybit';
 
 interface PriceTickerProps {
   onSelectSymbol: (symbol: string) => void;
@@ -13,13 +13,10 @@ export default function PriceTicker({ onSelectSymbol, selectedSymbol }: PriceTic
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const fetchTickers = async () => {
+    const fetchTickerData = async () => {
       try {
-        const response = await fetch('/api/bybit?action=tickers');
-        const result = await response.json();
-        if (result.success) {
-          setTickers(result.data);
-        }
+        const data = await getTickers();
+        setTickers(data);
       } catch (error) {
         console.error('Failed to fetch tickers:', error);
       } finally {
@@ -27,8 +24,8 @@ export default function PriceTicker({ onSelectSymbol, selectedSymbol }: PriceTic
       }
     };
 
-    fetchTickers();
-    const interval = setInterval(fetchTickers, 5000);
+    fetchTickerData();
+    const interval = setInterval(fetchTickerData, 5000);
     return () => clearInterval(interval);
   }, []);
 
