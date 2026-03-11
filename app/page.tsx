@@ -62,22 +62,14 @@ export default function TradingDashboard() {
     setError(null);
     
     try {
-      const response = await fetch(
-        `/api/bybit?action=kline&symbol=${symbol}&interval=${timeframe}&limit=2000`
-      );
-      const result = await response.json();
-      
-      if (result.success) {
-        setChartData(result.data);
-        if (result.data.length > 0) {
-          const lastCandle = result.data[result.data.length - 1];
-          const firstCandle = result.data[0];
-          setCurrentPrice(lastCandle.close);
-          setPriceChange(((lastCandle.close - firstCandle.close) / firstCandle.close) * 100);
-          setOwnedQuantity(wallet.positions[symbol]?.quantity || 0);
-        }
-      } else {
-        setError(result.error || 'Failed to fetch data');
+      const data = await getKlineData(symbol, timeframe, 2000);
+      setChartData(data);
+      if (data.length > 0) {
+        const lastCandle = data[data.length - 1];
+        const firstCandle = data[0];
+        setCurrentPrice(lastCandle.close);
+        setPriceChange(((lastCandle.close - firstCandle.close) / firstCandle.close) * 100);
+        setOwnedQuantity(wallet.positions[symbol]?.quantity || 0);
       }
     } catch (err) {
       setError('Network error. Please try again.');
