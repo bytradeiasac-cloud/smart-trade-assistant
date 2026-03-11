@@ -14,7 +14,147 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      pending_orders: {
+        Row: {
+          created_at: string
+          id: string
+          leverage: number | null
+          limit_price: number
+          quantity: number
+          symbol: string
+          type: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          leverage?: number | null
+          limit_price: number
+          quantity: number
+          symbol: string
+          type: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          leverage?: number | null
+          limit_price?: number
+          quantity?: number
+          symbol?: string
+          type?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      profiles: {
+        Row: {
+          avatar_url: string | null
+          created_at: string
+          id: string
+          username: string | null
+        }
+        Insert: {
+          avatar_url?: string | null
+          created_at?: string
+          id: string
+          username?: string | null
+        }
+        Update: {
+          avatar_url?: string | null
+          created_at?: string
+          id?: string
+          username?: string | null
+        }
+        Relationships: []
+      }
+      trades: {
+        Row: {
+          created_at: string
+          entry_price: number
+          entry_time: number
+          exit_price: number | null
+          exit_time: number | null
+          id: string
+          leverage: number | null
+          profit: number | null
+          profit_percent: number | null
+          quantity: number
+          status: string
+          stop_loss: number | null
+          symbol: string
+          take_profit: number | null
+          type: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          entry_price: number
+          entry_time: number
+          exit_price?: number | null
+          exit_time?: number | null
+          id?: string
+          leverage?: number | null
+          profit?: number | null
+          profit_percent?: number | null
+          quantity: number
+          status?: string
+          stop_loss?: number | null
+          symbol: string
+          take_profit?: number | null
+          type: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          entry_price?: number
+          entry_time?: number
+          exit_price?: number | null
+          exit_time?: number | null
+          id?: string
+          leverage?: number | null
+          profit?: number | null
+          profit_percent?: number | null
+          quantity?: number
+          status?: string
+          stop_loss?: number | null
+          symbol?: string
+          take_profit?: number | null
+          type?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      wallets: {
+        Row: {
+          balance: number
+          created_at: string
+          id: string
+          positions: Json
+          updated_at: string
+          usdt: number
+          user_id: string
+        }
+        Insert: {
+          balance?: number
+          created_at?: string
+          id?: string
+          positions?: Json
+          updated_at?: string
+          usdt?: number
+          user_id: string
+        }
+        Update: {
+          balance?: number
+          created_at?: string
+          id?: string
+          positions?: Json
+          updated_at?: string
+          usdt?: number
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never

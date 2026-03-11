@@ -14,9 +14,11 @@ import IndicatorBuilderChat from '@/components/indicator-builder-chat';
 import WalletPanel from '@/components/wallet-panel';
 import BuySellPanel from '@/components/buy-sell-panel';
 import TradeHistory from '@/components/trade-history';
-import { Wallet, Trade, PendingOrder, createInitialWallet, calculateWalletStats, calculateTradeProfit } from '@/lib/trading-context';
+import AuthPage from '@/components/auth-page';
+import { useAuth } from '@/hooks/use-auth';
+import { useTradingData } from '@/hooks/use-trading-data';
+import { Trade, PendingOrder, calculateWalletStats, calculateTradeProfit } from '@/lib/trading-context';
 
-// Dynamic import for TradingChart to avoid SSR issues with lightweight-charts
 const TradingChart = dynamic(() => import('@/components/trading-chart'), {
   ssr: false,
   loading: () => (
@@ -30,6 +32,14 @@ const TradingChart = dynamic(() => import('@/components/trading-chart'), {
 });
 
 export default function TradingDashboard() {
+  const { user, isReady, loading: authLoading, signIn, signUp, signOut } = useAuth();
+  const {
+    wallet, trades, pendingOrders,
+    saveWallet, addTrade, updateTrade,
+    addPendingOrder, updatePendingOrder, removePendingOrder,
+    dataLoaded,
+  } = useTradingData(user);
+
   const [symbol, setSymbol] = useState('BTCUSDT');
   const [timeframe, setTimeframe] = useState<TimeFrame>('1h');
   const [chartData, setChartData] = useState<KlineData[]>([]);
@@ -43,12 +53,8 @@ export default function TradingDashboard() {
   const [priceLines, setPriceLines] = useState<PriceLine[]>([]);
   const [markers, setMarkers] = useState<any[]>([]);
   const [activePanels, setActivePanels] = useState<string[]>(['RSI', 'MACD']);
-  const [ownedQuantity, setOwnedQuantity] = useState<number>(0); // Declare ownedQuantity
+  const [ownedQuantity, setOwnedQuantity] = useState<number>(0);
 
-  // Trading state
-  const [wallet, setWallet] = useState<Wallet>(() => createInitialWallet(10000));
-  const [trades, setTrades] = useState<Trade[]>([]);
-  const [pendingOrders, setPendingOrders] = useState<PendingOrder[]>([]);
   const tradingStats = calculateWalletStats(trades);
 
   const fetchChartData = useCallback(async () => {
@@ -68,7 +74,7 @@ export default function TradingDashboard() {
           const firstCandle = result.data[0];
           setCurrentPrice(lastCandle.close);
           setPriceChange(((lastCandle.close - firstCandle.close) / firstCandle.close) * 100);
-          setOwnedQuantity(wallet.positions[symbol]?.quantity || 0); // Update ownedQuantity
+          setOwnedQuantity(wallet.positions[symbol]?.quantity || 0);
         }
       } else {
         setError(result.error || 'Failed to fetch data');
@@ -82,10 +88,113 @@ export default function TradingDashboard() {
   }, [symbol, timeframe]);
 
   useEffect(() => {
+    if (!user) return;
     fetchChartData();
-    const interval = setInterval(fetchChartData, 30000); // Refresh every 30 seconds
+    const interval = setInterval(fetchChartData, 30000);
     return () => clearInterval(interval);
-  }, [fetchChartData]);
+  }, [fetchChartData, user]);
+
+  // Sync open trade lines on chart
+  useEffect(() => {
+    setPriceLines(prev => {
+      let filtered = prev.filter(pl => !pl.label.includes('[TRADE:'));
+      trades.forEach(trade => {
+        if (trade.status === 'OPEN') {
+          filtered.push({
+            price: trade.entryPrice,
+            label: `${trade.type} ${trade.quantity.toFixed(8)} @ $${trade.entryPrice.toFixed(2)} [TRADE:${trade.id}]`,
+            color: trade.type === 'BUY' ? '#3b82f6' : '#f59e0b',
+          });
+        }
+      });
+      return filtered;
+    });
+  }, [trades]);
+
+  // Monitor pending orders execution
+  useEffect(() => {
+    if (!currentPrice || pendingOrders.length === 0) return;
+
+    pendingOrders.forEach(order => {
+      const shouldExecute = 
+        (order.type === 'BUY' && currentPrice <= order.limitPrice) ||
+        (order.type === 'SELL' && currentPrice >= order.limitPrice);
+
+      if (shouldExecute) {
+        if (order.type === 'BUY') {
+          handleBuy(order.quantity, order.limitPrice, order.leverage);
+        } else {
+          handleSell(order.quantity, order.limitPrice, order.leverage);
+        }
+        removePendingOrder(order.id);
+        setPriceLines(prev => prev.filter(pl => !pl.label.includes(`[ID:${order.id}]`)));
+      }
+    });
+  }, [currentPrice, pendingOrders]);
+
+  // Monitor stop loss and take profit
+  useEffect(() => {
+    if (!currentPrice) return;
+
+    trades.forEach(trade => {
+      if (trade.status !== 'OPEN') return;
+
+      const shouldCloseSL = 
+        (trade.type === 'BUY' && trade.stopLoss && currentPrice <= trade.stopLoss) ||
+        (trade.type === 'SELL' && trade.stopLoss && currentPrice >= trade.stopLoss);
+
+      const shouldCloseTP = 
+        (trade.type === 'BUY' && trade.takeProfit && currentPrice >= trade.takeProfit) ||
+        (trade.type === 'SELL' && trade.takeProfit && currentPrice <= trade.takeProfit);
+
+      if (shouldCloseSL || shouldCloseTP) {
+        const closePrice = shouldCloseSL && trade.stopLoss ? trade.stopLoss : trade.takeProfit;
+        if (!closePrice) return;
+
+        const profit = (closePrice - trade.entryPrice) * trade.quantity;
+        const profitPercent = ((closePrice - trade.entryPrice) / trade.entryPrice) * 100;
+
+        updateTrade(trade.id, {
+          exitPrice: closePrice,
+          exitTime: Date.now(),
+          status: 'CLOSED',
+          profit,
+          profitPercent,
+        });
+
+        const pos = wallet.positions[trade.symbol];
+        if (pos) {
+          const revenue = trade.quantity * closePrice;
+          const newQty = pos.quantity - trade.quantity;
+          saveWallet({
+            ...wallet,
+            usdt: wallet.usdt + revenue,
+            positions: newQty <= 0
+              ? (() => { const { [trade.symbol]: _, ...rest } = wallet.positions; return rest; })()
+              : { ...wallet.positions, [trade.symbol]: { ...pos, quantity: newQty } },
+          });
+        }
+
+        setPriceLines(prev => 
+          prev.filter(pl => pl.price !== trade.stopLoss && pl.price !== trade.takeProfit)
+        );
+      }
+    });
+  }, [currentPrice, trades]);
+
+  // Show loading while auth initializes
+  if (!isReady) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  // Show auth page if not logged in
+  if (!user) {
+    return <AuthPage onSignIn={signIn} onSignUp={signUp} loading={authLoading} />;
+  }
 
   const handleSymbolChange = (newSymbol: string) => {
     setSymbol(newSymbol);
@@ -160,11 +269,11 @@ export default function TradingDashboard() {
   const activeIndicators = indicators.filter((i) => i.visible);
 
   // Trading handlers
-  const handleBuy = (quantity: number, price: number, leverage: number = 1, stopLoss?: number, takeProfit?: number) => {
+  const handleBuy = async (quantity: number, price: number, leverage: number = 1, stopLoss?: number, takeProfit?: number) => {
     const cost = (quantity * price) / leverage;
     if (cost > wallet.usdt) return;
 
-    const tradeId = Date.now().toString();
+    const tradeId = crypto.randomUUID();
     const newTrade: Trade = {
       id: tradeId,
       symbol,
@@ -178,93 +287,80 @@ export default function TradingDashboard() {
       leverage,
     };
 
-    setWallet(prev => {
-      const pos = prev.positions[symbol] || { quantity: 0, avgPrice: 0 };
-      const totalQty = pos.quantity + quantity;
-      const avgPrice = (pos.avgPrice * pos.quantity + price * quantity) / totalQty;
+    const pos = wallet.positions[symbol] || { quantity: 0, avgPrice: 0 };
+    const totalQty = pos.quantity + quantity;
+    const avgPrice = (pos.avgPrice * pos.quantity + price * quantity) / totalQty;
 
-      return {
-        ...prev,
-        usdt: prev.usdt - cost,
-        positions: {
-          ...prev.positions,
-          [symbol]: { quantity: totalQty, avgPrice },
-        },
-      };
-    });
+    const newWallet = {
+      ...wallet,
+      usdt: wallet.usdt - cost,
+      positions: {
+        ...wallet.positions,
+        [symbol]: { quantity: totalQty, avgPrice },
+      },
+    };
 
-    setTrades(prev => [...prev, newTrade]);
+    await Promise.all([
+      saveWallet(newWallet),
+      addTrade(newTrade),
+    ]);
 
-    // Adiciona linhas visuais para stop loss e take profit
     if (stopLoss) {
-      setPriceLines(prev => [...prev, {
-        price: stopLoss,
-        label: `SL ${stopLoss.toFixed(2)}`,
-        color: '#ef4444',
-      }]);
+      setPriceLines(prev => [...prev, { price: stopLoss, label: `SL ${stopLoss.toFixed(2)}`, color: '#ef4444' }]);
     }
     if (takeProfit) {
-      setPriceLines(prev => [...prev, {
-        price: takeProfit,
-        label: `TP ${takeProfit.toFixed(2)}`,
-        color: '#10b981',
-      }]);
+      setPriceLines(prev => [...prev, { price: takeProfit, label: `TP ${takeProfit.toFixed(2)}`, color: '#10b981' }]);
     }
   };
 
-  const handleSell = (quantity: number, price: number, leverage: number = 1, stopLoss?: number, takeProfit?: number) => {
-    const tradeId = Date.now().toString();
-    
-    // SHORT: vende sem ter a posição, usando saldo USDT como margem
+  const handleSell = async (quantity: number, price: number, leverage: number = 1, stopLoss?: number, takeProfit?: number) => {
     const revenue = quantity * price;
-    const cost = revenue / leverage; // Custo com leverage
+    const cost = revenue / leverage;
+    if (cost > wallet.usdt) return;
 
-    if (cost > wallet.usdt) return; // Valida saldo para margem
-
+    const tradeId = crypto.randomUUID();
     const newTrade: Trade = {
       id: tradeId,
       symbol,
       type: 'SELL',
       quantity,
-      entryPrice: price, // Preço de entrada no SHORT
-      exitPrice: undefined,
+      entryPrice: price,
       entryTime: Date.now(),
-      exitTime: undefined,
       status: 'OPEN',
-      profit: undefined,
-      profitPercent: undefined,
       stopLoss,
       takeProfit,
       leverage,
     };
 
-    setWallet(prev => ({
-      ...prev,
-      usdt: prev.usdt - cost, // Usa saldo como margem
-    }));
+    const newWallet = {
+      ...wallet,
+      usdt: wallet.usdt - cost,
+    };
 
-    setTrades(prev => [...prev, newTrade]);
+    await Promise.all([
+      saveWallet(newWallet),
+      addTrade(newTrade),
+    ]);
   };
 
-  const handleAddFunds = (amount: number) => {
-    setWallet(prev => ({
-      ...prev,
-      balance: prev.balance + amount,
-      usdt: prev.usdt + amount,
-    }));
+  const handleAddFunds = async (amount: number) => {
+    await saveWallet({
+      ...wallet,
+      balance: wallet.balance + amount,
+      usdt: wallet.usdt + amount,
+    });
   };
 
-  const handleWithdraw = (amount: number) => {
+  const handleWithdraw = async (amount: number) => {
     if (amount > wallet.usdt) return;
-    setWallet(prev => ({
-      ...prev,
-      balance: prev.balance - amount,
-      usdt: prev.usdt - amount,
-    }));
+    await saveWallet({
+      ...wallet,
+      balance: wallet.balance - amount,
+      usdt: wallet.usdt - amount,
+    });
   };
 
-  // Handler para fechar posição aberta
-  const handleClosePosition = (tradeId: string) => {
+  const handleClosePosition = async (tradeId: string) => {
     if (!currentPrice) return;
     
     const trade = trades.find(t => t.id === tradeId && t.status === 'OPEN');
@@ -274,77 +370,45 @@ export default function TradingDashboard() {
     let profitPercent: number;
 
     if (trade.type === 'BUY') {
-      // BUY: lucro quando preço sobe
       profit = (currentPrice - trade.entryPrice) * trade.quantity;
       profitPercent = ((currentPrice - trade.entryPrice) / trade.entryPrice) * 100;
     } else {
-      // SELL (SHORT): lucro quando preço cai
       profit = (trade.entryPrice - currentPrice) * trade.quantity;
       profitPercent = ((trade.entryPrice - currentPrice) / trade.entryPrice) * 100;
     }
 
-    setTrades(prev =>
-      prev.map(t =>
-        t.id === tradeId
-          ? {
-              ...t,
-              exitPrice: currentPrice,
-              exitTime: Date.now(),
-              status: 'CLOSED' as const,
-              profit,
-              profitPercent,
-            }
-          : t
-      )
-    );
+    await Promise.all([
+      updateTrade(tradeId, {
+        exitPrice: currentPrice,
+        exitTime: Date.now(),
+        status: 'CLOSED',
+        profit,
+        profitPercent,
+      }),
+      saveWallet({
+        ...wallet,
+        usdt: wallet.usdt + profit,
+      }),
+    ]);
 
-    setWallet(prev => ({
-      ...prev,
-      usdt: prev.usdt + profit, // Adiciona o lucro/perda ao saldo
-    }));
-
-    // Remove a linha da posição fechada do gráfico
-    setPriceLines(prev => prev.filter(pl => !pl.label.includes(`[TRADE:${tradeId}]`)));
-
-    // Remove a linha da posição fechada do gráfico
     setPriceLines(prev => prev.filter(pl => !pl.label.includes(`[TRADE:${tradeId}]`)));
   };
 
-  // Handler para editar ordem pendente
-  const handleEditOrder = (orderId: string, newPrice: number) => {
-    setPendingOrders(prev =>
-      prev.map(order =>
-        order.id === orderId ? { ...order, limitPrice: newPrice } : order
-      )
-    );
-
-    // Atualiza a linha no gráfico
+  const handleEditOrder = async (orderId: string, newPrice: number) => {
+    await updatePendingOrder(orderId, newPrice);
     setPriceLines(prev => {
       const filtered = prev.filter(pl => !pl.label.includes(orderId));
-      return [
-        ...filtered,
-        {
-          price: newPrice,
-          label: `${orderId.substring(0, 8)} ${newPrice.toFixed(2)}`,
-          color: '#10b981',
-        },
-      ];
+      return [...filtered, { price: newPrice, label: `${orderId.substring(0, 8)} ${newPrice.toFixed(2)}`, color: '#10b981' }];
     });
   };
 
-  // Handler para cancelar ordem pendente
-  const handleCancelOrder = (orderId: string) => {
-    setPendingOrders(prev => prev.filter(order => order.id !== orderId));
-
-    // Remove a linha do gráfico usando o padrão [ID:orderId]
-    setPriceLines(prev =>
-      prev.filter(pl => !pl.label.includes(`[ID:${orderId}]`))
-    );
+  const handleCancelOrder = async (orderId: string) => {
+    await removePendingOrder(orderId);
+    setPriceLines(prev => prev.filter(pl => !pl.label.includes(`[ID:${orderId}]`)));
   };
 
-  // Handler para criar ordem de limite
-  const handleCreateLimitOrder = (quantity: number, limitPrice: number, orderType: 'BUY' | 'SELL', leverage: number = 1) => {
-    const orderId = Date.now().toString();
+  const handleCreateLimitOrder = async (quantity: number, limitPrice: number, orderType: 'BUY' | 'SELL', leverage: number = 1) => {
+    const orderId = crypto.randomUUID();
     const newOrder: PendingOrder = {
       id: orderId,
       symbol,
@@ -355,119 +419,14 @@ export default function TradingDashboard() {
       createdAt: Date.now(),
     };
 
-    setPendingOrders(prev => [...prev, newOrder]);
+    await addPendingOrder(newOrder);
 
-    // Adiciona linha visual no gráfico para a ordem de limite - com ID para rastreamento
     setPriceLines(prev => [...prev, {
       price: limitPrice,
       label: `${orderType} ${quantity.toFixed(8)} @ $${limitPrice.toFixed(2)} [ID:${orderId}]`,
       color: orderType === 'BUY' ? '#10b981' : '#ef4444',
     }]);
   };
-
-  // Sincroniza linhas de trades abertos no gráfico
-  useEffect(() => {
-    setPriceLines(prev => {
-      // Remove todas as linhas de trades abertos
-      let filtered = prev.filter(pl => !pl.label.includes('[TRADE:'));
-
-      // Adiciona linhas para trades abertos
-      trades.forEach(trade => {
-        if (trade.status === 'OPEN') {
-          filtered.push({
-            price: trade.entryPrice,
-            label: `${trade.type} ${trade.quantity.toFixed(8)} @ $${trade.entryPrice.toFixed(2)} [TRADE:${trade.id}]`,
-            color: trade.type === 'BUY' ? '#3b82f6' : '#f59e0b', // Azul para BUY, Âmbar para SELL
-          });
-        }
-      });
-
-      return filtered;
-    });
-  }, [trades]);
-
-  // Monitor de ordens pendentes - executa quando preço toca
-  useEffect(() => {
-    if (!currentPrice || pendingOrders.length === 0) return;
-
-    pendingOrders.forEach(order => {
-      const shouldExecute = 
-        (order.type === 'BUY' && currentPrice <= order.limitPrice) ||
-        (order.type === 'SELL' && currentPrice >= order.limitPrice);
-
-      if (shouldExecute) {
-        if (order.type === 'BUY') {
-          handleBuy(order.quantity, order.limitPrice, order.leverage);
-        } else {
-          handleSell(order.quantity, order.limitPrice, order.leverage);
-        }
-
-        // Remove a ordem pendente e a linha do gráfico usando o ID
-        setPendingOrders(prev => prev.filter(o => o.id !== order.id));
-        setPriceLines(prev => prev.filter(pl => !pl.label.includes(`[ID:${order.id}]`)));
-      }
-    });
-  }, [currentPrice, pendingOrders]);
-
-  // Monitor stop loss e take profit
-  useEffect(() => {
-    if (!currentPrice) return;
-
-    trades.forEach(trade => {
-      if (trade.status !== 'OPEN') return;
-
-      const shouldCloseSL = 
-        (trade.type === 'BUY' && trade.stopLoss && currentPrice <= trade.stopLoss) ||
-        (trade.type === 'SELL' && trade.stopLoss && currentPrice >= trade.stopLoss);
-
-      const shouldCloseTP = 
-        (trade.type === 'BUY' && trade.takeProfit && currentPrice >= trade.takeProfit) ||
-        (trade.type === 'SELL' && trade.takeProfit && currentPrice <= trade.takeProfit);
-
-      if (shouldCloseSL || shouldCloseTP) {
-        const closePrice = shouldCloseSL && trade.stopLoss ? trade.stopLoss : trade.takeProfit;
-        if (!closePrice) return;
-
-        // Fecha a posição ao preço de SL ou TP
-        const revenue = trade.quantity * closePrice;
-        const profit = (closePrice - trade.entryPrice) * trade.quantity;
-
-        setTrades(prev =>
-          prev.map(t =>
-            t.id === trade.id
-              ? {
-                  ...t,
-                  exitPrice: closePrice,
-                  exitTime: Date.now(),
-                  status: 'CLOSED' as const,
-                  profit,
-                  profitPercent: ((closePrice - t.entryPrice) / t.entryPrice) * 100,
-                }
-              : t
-          )
-        );
-
-        setWallet(prev => {
-          const pos = prev.positions[trade.symbol];
-          if (!pos) return prev;
-
-          const newQty = pos.quantity - trade.quantity;
-          return {
-            ...prev,
-            usdt: prev.usdt + revenue,
-            positions: newQty <= 0
-              ? (() => { const { [trade.symbol]: _, ...rest } = prev.positions; return rest; })()
-              : { ...prev.positions, [trade.symbol]: { ...pos, quantity: newQty } },
-          };
-        });
-
-        // Remove as linhas do gráfico
-        setPriceLines(prev => 
-          prev.filter(pl => pl.price !== trade.stopLoss && pl.price !== trade.takeProfit)
-        );
-      }
-    });
-  }, [currentPrice, trades]);
 
   return (
     <div className="flex flex-col h-screen bg-background">
@@ -478,6 +437,14 @@ export default function TradingDashboard() {
           <span className="text-sm text-muted-foreground">Market Analyzer</span>
         </div>
         <div className="flex items-center gap-2">
+          <span className="text-xs text-muted-foreground">{user.email}</span>
+          <button
+            type="button"
+            onClick={signOut}
+            className="px-3 py-1.5 rounded text-sm bg-secondary text-secondary-foreground hover:bg-accent transition-colors"
+          >
+            Sair
+          </button>
           <button
             type="button"
             onClick={() => setIsChatOpen(!isChatOpen)}
@@ -564,7 +531,7 @@ export default function TradingDashboard() {
             )}
           </div>
 
-          {/* Indicator Panels (RSI, MACD, etc.) */}
+          {/* Indicator Panels */}
           {chartData.length > 0 && !loading && (
             <div className="w-full bg-card border-t border-border">
               <IndicatorPanels data={chartData} visible={{
@@ -582,10 +549,9 @@ export default function TradingDashboard() {
           )}
         </div>
 
-        {/* Sidebar Panel - Fixed */}
+        {/* Sidebar Panel */}
         {isChatOpen && (
           <div className="w-[400px] flex-shrink-0 border-l border-border h-full overflow-hidden flex flex-col bg-card">
-            {/* Tabs Header */}
             <div className="flex items-center border-b border-border">
               <button
                 onClick={() => setActiveTab('chat')}
@@ -619,19 +585,14 @@ export default function TradingDashboard() {
               </button>
             </div>
 
-            {/* Tab Content */}
             <div className="flex-1 overflow-y-auto space-y-3 p-3">
-              {/* SIMULATOR TAB */}
               {activeTab === 'simulator' && (
                 <>
-                  {/* Wallet Panel */}
                   <WalletPanel
                     wallet={wallet}
                     onAddFunds={handleAddFunds}
                     onWithdraw={handleWithdraw}
                   />
-
-                  {/* Buy/Sell Panel */}
                   <BuySellPanel
                     symbol={symbol}
                     currentPrice={currentPrice}
@@ -653,8 +614,6 @@ export default function TradingDashboard() {
                     availableBalance={wallet.usdt}
                     ownedQuantity={ownedQuantity}
                   />
-
-                  {/* Trade History */}
                   <TradeHistory
                     trades={tradingStats.trades}
                     pendingOrders={pendingOrders}
@@ -670,7 +629,6 @@ export default function TradingDashboard() {
                 </>
               )}
 
-              {/* CHAT AI TAB */}
               {activeTab === 'chat' && (
                 <AIChat
                   symbol={symbol}
@@ -687,7 +645,6 @@ export default function TradingDashboard() {
                 />
               )}
 
-              {/* INDICATOR TAB */}
               {activeTab === 'indicator' && (
                 <IndicatorBuilderChat
                   chartData={chartData}
