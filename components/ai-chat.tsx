@@ -97,7 +97,8 @@ export default function AIChat({
     try {
       
       
-      const response = await fetch('/api/chat', {
+      const supabaseUrl = (supabase as any).supabaseUrl || 'https://sssjdmvuvixdcfvnkoky.supabase.co';
+      const response = await fetch(`${supabaseUrl}/functions/v1/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
